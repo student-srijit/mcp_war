@@ -1,0 +1,68 @@
+{
+  "domains": {
+    "Structural Engineering": {
+      "fact_verifier": 0.15,
+      "math_validator": 0.30,
+      "code_analyzer": 0.05,
+      "standards_agent": 0.25,
+      "reasoning_agent": 0.15,
+      "description": "Emphasizes mathematical accuracy and standards compliance for safety"
+    },
+    "Software Development": {
+      "fact_verifier": 0.10,
+      "math_validator": 0.10,
+      "code_analyzer": 0.45,
+      "standards_agent": 0.10,
+      "reasoning_agent": 0.25,
+      "description": "Heavily weighted toward code analysis and logical reasoning"
+    },
+    "Infrastructure & Energy": {
+      "fact_verifier": 0.15,
+      "math_validator": 0.35,
+      "code_analyzer": 0.05,
+      "standards_agent": 0.25,
+      "reasoning_agent": 0.20,
+      "description": "Math and standards critical for infrastructure safety"
+    },
+    "Healthcare Systems": {
+      "fact_verifier": 0.30,
+      "math_validator": 0.25,
+      "code_analyzer": 0.10,
+      "standards_agent": 0.25,
+      "reasoning_agent": 0.10,
+      "description": "Fact verification and standards (medical) are paramount"
+    },
+    "Financial Modeling": {
+      "fact_verifier": 0.20,
+      "math_validator": 0.40,
+      "code_analyzer": 0.10,
+      "standards_agent": 0.10,
+      "reasoning_agent": 0.20,
+      "description": "Mathematical accuracy and logical consistency essential"
+    },
+    "Standards Reference": {
+      "fact_verifier": 0.20,
+      "math_validator": 0.10,
+      "code_analyzer": 0.10,
+      "standards_agent": 0.50,
+      "reasoning_agent": 0.10,
+      "description": "Standards verification is the primary concern"
+    },
+    "General Technical": {
+      "fact_verifier": 0.20,
+      "math_validator": 0.20,
+      "code_analyzer": 0.20,
+      "standards_agent": 0.20,
+      "reasoning_agent": 0.20,
+      "description": "Equal weighting across all verification domains"
+    }
+  },
+  "thresholds": {
+    "approved": 0.85,
+    "warning": 0.60,
+    "rejected": 0.0,
+    "escalated": -0.1
+  },
+  "version": "1.0.0",
+  "lastUpdated": "2024-01-01T00:00:00Z"
+}
