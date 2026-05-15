@@ -1,4 +1,4 @@
-import { VerificationJob, PipelineStep, FeedLogEntry } from './schemas';
+import { VerificationJob, PipelineStep, FeedLogEntry, AgentResponse } from './schemas';
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -10,11 +10,13 @@ import * as path from 'path';
 const STORE_DIR = path.join(process.cwd(), '.veritas-store');
 const JOBS_DIR = path.join(STORE_DIR, 'jobs');
 const LOGS_DIR = path.join(STORE_DIR, 'logs');
+const RESPONSES_DIR = path.join(STORE_DIR, 'responses');
 
 function ensureDirs() {
   if (!fs.existsSync(STORE_DIR)) fs.mkdirSync(STORE_DIR, { recursive: true });
   if (!fs.existsSync(JOBS_DIR)) fs.mkdirSync(JOBS_DIR, { recursive: true });
   if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
+  if (!fs.existsSync(RESPONSES_DIR)) fs.mkdirSync(RESPONSES_DIR, { recursive: true });
 }
 
 function readJSON<T>(filePath: string): T | null {
@@ -92,6 +94,34 @@ export class JobManager {
     try {
       const files = fs.readdirSync(JOBS_DIR).filter(f => f.endsWith('.json'));
       return files.map(f => readJSON<VerificationJob>(path.join(JOBS_DIR, f))).filter(Boolean) as VerificationJob[];
+    } catch {
+      return [];
+    }
+  }
+
+  static saveAgentResponse(response: AgentResponse): void {
+    ensureDirs();
+    const jobResponsesDir = path.join(RESPONSES_DIR, response.jobId);
+    if (!fs.existsSync(jobResponsesDir)) fs.mkdirSync(jobResponsesDir, { recursive: true });
+    
+    // Save metadata
+    const metadataPath = path.join(jobResponsesDir, `${response.id}.json`);
+    writeJSON(metadataPath, response);
+    
+    // Save content to raw file if applicable (useful for IDEs)
+    const contentPath = path.join(jobResponsesDir, response.filename);
+    fs.writeFileSync(contentPath, response.content, 'utf-8');
+    console.log(`[VERITAS] Saved agent response ${response.filename} for job ${response.jobId}`);
+  }
+
+  static getAgentResponses(jobId: string): AgentResponse[] {
+    ensureDirs();
+    const jobResponsesDir = path.join(RESPONSES_DIR, jobId);
+    if (!fs.existsSync(jobResponsesDir)) return [];
+    
+    try {
+      const files = fs.readdirSync(jobResponsesDir).filter(f => f.endsWith('.json'));
+      return files.map(f => readJSON<AgentResponse>(path.join(jobResponsesDir, f))).filter(Boolean) as AgentResponse[];
     } catch {
       return [];
     }

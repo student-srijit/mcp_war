@@ -19,9 +19,19 @@ Return valid JSON with this exact structure:
   ]
 }`;
 
-  const userPrompt = `Domain: ${domain}\nQuery: ${query}\n\nExtract all technical claims from this query.`;
+  const userPrompt = `Domain: ${domain}\nText:\n${query}\n\nExtract all technical claims from this text. Ensure output is pure JSON.`;
 
-  const result = await parseJSONFromGroq(systemPrompt, userPrompt);
+  let result;
+  try {
+    result = await parseJSONFromGroq(systemPrompt, userPrompt);
+  } catch (error) {
+    console.warn('[VERITAS] Failed to parse claims JSON, using fallback claim extraction.', error);
+    result = {
+      claims: [
+        { type: "factual", content: query.slice(0, 500) + (query.length > 500 ? "..." : ""), severity: "major" }
+      ]
+    };
+  }
 
   // Safely extract claims array
   const claimsArray = Array.isArray(result.claims) ? result.claims : [];

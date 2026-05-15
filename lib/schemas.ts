@@ -16,6 +16,8 @@ export interface Issue {
   claimId: string;
   description: string;
   severity: 'critical' | 'major' | 'minor';
+  flagReason?: string;
+  suggestedEdit?: string;
 }
 
 export interface Evidence {
@@ -45,6 +47,19 @@ export interface Finding {
   issue: string;
   evidence?: string;
   suggestedFix?: string;
+  flagReason?: string;
+  hasPatch?: boolean;
+  patchFile?: string;
+}
+
+export interface AgentResponse {
+  id: string;
+  jobId: string;
+  agentName: string;
+  type: 'code_patch' | 'math_proof' | 'reasoning' | 'text';
+  filename: string;
+  content: string;
+  createdAt: number;
 }
 
 export interface EvidenceItem {
@@ -61,6 +76,8 @@ export interface VerificationJob {
   jobId: string;
   query: string;
   domain: string;
+  intent?: 'GENERATE' | 'VERIFY';
+  initialResponse?: string;
   status: 'pending' | 'queued' | 'running' | 'completed' | 'failed';
   createdAt: number;
   startedAt?: number;
@@ -73,6 +90,7 @@ export interface VerificationJob {
   retryCount?: number;
   pipelineSteps: PipelineStep[];
   activeTools?: string[]; // Tools that are active for this job
+  mcpToken?: string;
 }
 
 export interface PipelineStep {

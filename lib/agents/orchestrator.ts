@@ -1,5 +1,7 @@
 import { VerificationJob, AgentVerdict, FeedLogEntry } from '../schemas';
 import { generateClaims } from './generator';
+import { detectIntent } from './intentClassifier';
+import { generateInitialSolution } from './solverAgent';
 import { verifyFactualClaims } from './factVerifier';
 import { validateMathClaims } from './mathValidator';
 import { analyzeCodeClaims } from './codeAnalyzer';
@@ -28,10 +30,29 @@ export async function runVerificationPipeline(job: VerificationJob) {
     JobManager.updateJob(job.jobId, { status: 'running', startedAt: Date.now() });
     emitLog(job.jobId, 'ORCHESTRATOR', `Pipeline started for domain: ${job.domain}`, 'info');
 
+    // ── Stage 0: Intent Detection & Generation ──
+    emitLog(job.jobId, 'ORCHESTRATOR', 'Detecting user intent (GENERATE vs VERIFY)...', 'info');
+    const intent = await detectIntent(job.query);
+    job.intent = intent;
+    JobManager.updateJob(job.jobId, { intent });
+
+    let sourceTextForClaims = job.query;
+
+    if (intent === 'GENERATE') {
+      emitLog(job.jobId, 'PRIMARY_RESPONDER', 'Intent is GENERATE. Generating expert solution...', 'info');
+      const initialResponse = await generateInitialSolution(job.query, job.domain);
+      job.initialResponse = initialResponse;
+      JobManager.updateJob(job.jobId, { initialResponse });
+      emitLog(job.jobId, 'PRIMARY_RESPONDER', 'Initial solution generated successfully.', 'success');
+      sourceTextForClaims = initialResponse;
+    } else {
+      emitLog(job.jobId, 'ORCHESTRATOR', 'Intent is VERIFY. Proceeding directly to verification...', 'info');
+    }
+
     // ── Stage 1: Generate claims via Groq ──
     emitLog(job.jobId, 'GENERATOR', 'Starting claim extraction via Groq LLM...', 'info');
 
-    let claims = await generateClaims(job.query, job.domain);
+    let claims = await generateClaims(sourceTextForClaims, job.domain);
     job.claims = claims;
     JobManager.updateJob(job.jobId, { claims });
 
@@ -80,7 +101,7 @@ export async function runVerificationPipeline(job: VerificationJob) {
       })(),
       (async () => {
         emitLog(job.jobId, 'CODE_ANALYZER', 'Analyzing code claims via Groq...', 'info');
-        const result = await analyzeCodeClaims(claims);
+        const result = await analyzeCodeClaims(claims, job.jobId);
         emitLog(job.jobId, 'CODE_ANALYZER',
           `Completed: ${result.verdict} (${(result.confidenceScore * 100).toFixed(0)}%) — ${result.issues.length} issues`,
           result.verdict === 'pass' ? 'success' : result.verdict === 'fail' ? 'error' : 'warning'
@@ -206,7 +227,7 @@ export async function runVerificationPipeline(job: VerificationJob) {
       const [reFact, reMath, reCode, reReasoning, reStandards, reGithub] = await Promise.allSettled([
         verifyFactualClaims(claims),
         validateMathClaims(claims),
-        analyzeCodeClaims(claims),
+        analyzeCodeClaims(claims, job.jobId),
         performReasoning(claims, job.query),
         verifyStandardsClaims(claims),
         analyzeGitHub(claims, job.query),

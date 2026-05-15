@@ -11,7 +11,8 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { ChevronDown, ThumbsUp, ThumbsDown, Download, ArrowRight, Copy, Check } from 'lucide-react';
+import { ChevronDown, ThumbsUp, ThumbsDown, Download, ArrowRight, Copy, Check, Terminal } from 'lucide-react';
+import { KnowledgeGraph3D } from './KnowledgeGraph3D';
 
 interface FinalResultsViewProps {
   state: VerificationState;
@@ -27,6 +28,29 @@ export function FinalResultsView({
   const [animatedScore, setAnimatedScore] = useState(0);
   const [expandedAccordion, setExpandedAccordion] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [mcpToken, setMcpToken] = useState<string | null>(null);
+  const [isGeneratingMcp, setIsGeneratingMcp] = useState(false);
+
+  const generateMcpToken = async () => {
+    setIsGeneratingMcp(true);
+    try {
+      const res = await fetch('/api/mcp/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: state.jobId }),
+      });
+      const data = await res.json();
+      if (data.token) {
+        setMcpToken(data.token);
+      } else {
+        alert(data.error || 'Failed to generate MCP token');
+      }
+    } catch (e) {
+      alert('Error connecting to MCP service');
+    } finally {
+      setIsGeneratingMcp(false);
+    }
+  };
 
   useEffect(() => {
     let current = 0;
@@ -137,6 +161,28 @@ export function FinalResultsView({
           </div>
         </div>
       </div>
+
+      {/* Generated Solution (Only if intent was GENERATE) */}
+      {state.intent === 'GENERATE' && state.initialResponse && (
+        <div className="mb-12 border border-[#1f2937] rounded-xl bg-[#111827] overflow-hidden shadow-2xl">
+          <div className={`px-6 py-4 border-b border-[#1f2937] flex items-center justify-between ${
+            state.finalVerdict === 'APPROVED' ? 'bg-[#10b981]/10' : 'bg-[#ef4444]/10'
+          }`}>
+            <h3 className="text-sm font-mono uppercase tracking-wider text-white font-bold flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-[#4f46e5]" />
+              Verified Solution
+            </h3>
+            <span className={`text-xs font-mono px-2 py-1 rounded border ${
+               state.finalVerdict === 'APPROVED' ? 'bg-[#10b981]/20 border-[#10b981]/50 text-[#10b981]' : 'bg-[#ef4444]/20 border-[#ef4444]/50 text-[#ef4444]'
+            }`}>
+              {state.finalVerdict === 'APPROVED' ? 'Validated by 9 Agents' : 'Flaws Detected'}
+            </span>
+          </div>
+          <div className="p-6 text-sm text-[#d1d5db] font-mono whitespace-pre-wrap leading-relaxed max-h-[500px] overflow-y-auto">
+            {state.initialResponse}
+          </div>
+        </div>
+      )}
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-12">
@@ -253,6 +299,11 @@ export function FinalResultsView({
         </div>
       </div>
 
+      {/* Cinematic 3D Knowledge Graph */}
+      <div className="mb-12 border border-[#1f2937] rounded-xl overflow-hidden shadow-2xl h-[500px]">
+        <KnowledgeGraph3D state={state} />
+      </div>
+
       {/* Agent Verdict Details Accordion */}
       <div className="mb-12">
         <h3 className="text-sm font-mono uppercase tracking-wider text-[#9ca3af] mb-4">
@@ -278,7 +329,9 @@ export function FinalResultsView({
                 <ChevronDown className={`w-4 h-4 text-[#6b7280] transition ${expandedAccordion === agent.id ? 'rotate-180' : ''}`} />
               </button>
 
-              {expandedAccordion === agent.id && (
+              {expandedAccordion === agent.id && (() => {
+                const realVerdict = state.agentVerdicts?.find((v: any) => v.agentId.replace('_', '-') === agent.id);
+                return (
                 <div className="px-4 py-3 border-t border-[#1f2937] bg-[#111827] text-sm text-[#9ca3af] space-y-3">
                   <div>
                     <p className="text-xs font-mono uppercase text-[#6b7280] mb-1">Status</p>
@@ -294,8 +347,41 @@ export function FinalResultsView({
                     <p className="text-xs font-mono uppercase text-[#6b7280] mb-1">Role</p>
                     <p>{agent.role}</p>
                   </div>
+                  
+                  {realVerdict?.findings?.length > 0 && (
+                    <div className="mt-4 border-t border-[#1f2937] pt-3">
+                      <p className="text-xs font-mono uppercase text-[#6b7280] mb-2">Detailed Issues</p>
+                      <div className="space-y-3">
+                        {realVerdict.findings.map((f: any, i: number) => (
+                          <div key={i} className="p-3 bg-[#0a0a0f] border border-[#1f2937] rounded">
+                            <p className="text-white text-sm font-semibold mb-1">{f.issue}</p>
+                            {f.flagReason && (
+                              <div className="mt-2 bg-red-900/20 border-l-2 border-red-500 pl-2 py-1">
+                                <span className="text-xs font-bold text-red-400 block uppercase tracking-wider mb-1">Why it flagged</span>
+                                <p className="text-red-200 text-xs leading-relaxed">{f.flagReason}</p>
+                              </div>
+                            )}
+                            {f.suggestedFix && (
+                              <div className="mt-2 bg-green-900/20 border-l-2 border-green-500 pl-2 py-1">
+                                <span className="text-xs font-bold text-green-400 block uppercase tracking-wider mb-1">Suggested Edit</span>
+                                <p className="text-green-200 text-xs font-mono whitespace-pre-wrap">{f.suggestedFix}</p>
+                              </div>
+                            )}
+                            {f.hasPatch && (
+                              <div className="mt-2">
+                                <span className="px-2 py-1 bg-indigo-900/40 text-indigo-300 text-xs rounded border border-indigo-500/30 font-mono">
+                                  Patch available via MCP: {f.patchFile}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+              );
+              })()}
             </div>
           ))}
         </div>
@@ -336,7 +422,7 @@ export function FinalResultsView({
       </div>
 
       {/* Action Buttons */}
-      <div className="flex flex-col sm:flex-row gap-4">
+      <div className="flex flex-col sm:flex-row gap-4 flex-wrap">
         <button
           onClick={onNewQuery}
           className="flex-1 px-6 py-3 bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold rounded-lg text-sm transition flex items-center justify-center gap-2 shadow-lg hover:shadow-indigo-500/30"
@@ -358,7 +444,25 @@ export function FinalResultsView({
           {copied ? <Check className="w-4 h-4 text-[#10b981]" /> : <Copy className="w-4 h-4" />}
           {copied ? 'Copied!' : 'Copy Report'}
         </button>
+        <button
+          onClick={mcpToken ? () => { navigator.clipboard.writeText(mcpToken); alert('Token copied!'); } : generateMcpToken}
+          disabled={isGeneratingMcp}
+          className="flex-1 px-6 py-3 border border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 text-indigo-300 font-bold rounded-lg text-sm transition flex items-center justify-center gap-2"
+        >
+          <Terminal className="w-4 h-4" />
+          {isGeneratingMcp ? 'Generating...' : mcpToken ? 'Copy MCP Token' : 'Generate MCP Sync Token'}
+        </button>
       </div>
+
+      {mcpToken && (
+        <div className="mt-4 p-4 border border-indigo-500/30 bg-indigo-900/10 rounded-lg flex flex-col sm:flex-row items-center justify-between gap-4">
+           <div>
+             <p className="text-sm font-bold text-indigo-300 mb-1">IDE Sync Ready</p>
+             <p className="text-xs text-indigo-400">Use this token in your VS Code / MCP extension to sync agentic fixes directly to your workspace.</p>
+           </div>
+           <code className="bg-black px-4 py-2 rounded text-indigo-300 font-mono text-sm border border-indigo-500/20">{mcpToken}</code>
+        </div>
+      )}
     </div>
   );
 }

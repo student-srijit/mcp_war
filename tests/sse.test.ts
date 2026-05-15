@@ -8,7 +8,7 @@ describe('SSE stream route', () => {
     const job = JobManager.createJob('unit test query', 'General Technical');
     const req: any = { signal: new AbortController().signal };
 
-    const res: any = await GET(req, { params: { jobId: job.jobId } });
+    const res: any = await GET(req, { params: Promise.resolve({ jobId: job.jobId }) });
 
     expect(res).toBeDefined();
     const ct = res.headers.get('Content-Type') || res.headers.get('content-type');
@@ -17,7 +17,7 @@ describe('SSE stream route', () => {
 
   it('returns 404 for missing job', async () => {
     const req: any = { signal: new AbortController().signal };
-    const res: any = await GET(req, { params: { jobId: 'NO-SUCH-JOB' } });
+    const res: any = await GET(req, { params: Promise.resolve({ jobId: 'NO-SUCH-JOB' }) });
     expect(res.status).toBe(404);
   });
 });

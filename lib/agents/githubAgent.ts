@@ -168,16 +168,73 @@ export async function analyzeGitHub(
           });
         }
       } else {
-        // No specific file — get repo tree overview
+        // No specific file — get repo tree overview and deep analyze core files
         const tree = await githubClient.getRepoTree(parsed.owner, parsed.repo);
         if (tree.length > 0) {
-          const sourceFiles = tree.filter(f => f.type === 'blob').slice(0, 20);
+          const sourceFiles = tree.filter(f => f.type === 'blob');
           evidence.push({
             claimId,
             sourceUrl: `https://github.com/${parsed.owner}/${parsed.repo}`,
-            excerpt: `Repo structure: ${tree.length} items | Key files: ${sourceFiles.map(f => f.path).slice(0, 5).join(', ')}`,
+            excerpt: `Repo structure: ${tree.length} items. Initiating Deep Analysis on core files...`,
             supports: true,
           });
+
+          // Heuristic to pick 3 most critical files
+          const getScore = (path: string) => {
+            const p = path.toLowerCase();
+            if (p === 'readme.md') return 100;
+            if (p === 'package.json' || p === 'requirements.txt' || p === 'cargo.toml') return 90;
+            if (p.includes('src/') || p.includes('lib/') || p.includes('app/')) {
+               if (p.endsWith('.ts') || p.endsWith('.py') || p.endsWith('.tsx') || p.endsWith('.rs')) return 80;
+            }
+            if (p.endsWith('.js') || p.endsWith('.jsx')) return 70;
+            return 0;
+          };
+
+          const targetFiles = sourceFiles.sort((a, b) => getScore(b.path) - getScore(a.path)).slice(0, 3);
+
+          for (const fileInfo of targetFiles) {
+            const file = await githubClient.readFile(parsed.owner, parsed.repo, fileInfo.path, parsed.branch);
+            if (!file) continue;
+
+            // Analyze the code with LLM
+            const codeSnippet = file.content.slice(0, 4000);
+            try {
+              const analysis = await callGroqAPI(
+                GITHUB_ANALYSIS_PROMPT,
+                `Repository: ${parsed.owner}/${parsed.repo}\nFile: ${file.path}\nLanguage: ${file.language || 'unknown'}\n\nCode:\n\`\`\`\n${codeSnippet}\n\`\`\``,
+                0.1,
+                2000,
+                { type: 'json_object' } // Force JSON mode for reliability
+              );
+
+              const jsonMatch = analysis.match(/\{[\s\S]*\}/);
+              if (jsonMatch) {
+                const result = JSON.parse(jsonMatch[0]);
+                const codeIssues = Array.isArray(result.issues) ? result.issues : [];
+
+                for (const issue of codeIssues) {
+                  issues.push({
+                    claimId,
+                    description: `[${issue.file || file.path}] ${issue.description}`,
+                    severity: issue.severity || 'minor',
+                  });
+                  if (issue.suggestedFix) {
+                    correctiveHints.push(`${file.path}: ${issue.suggestedFix}`);
+                  }
+                }
+
+                evidence.push({
+                  claimId,
+                  sourceUrl: file.url,
+                  excerpt: `Deep Analysis (${file.path}): ${result.summary || "Quality: " + result.overallQuality} | Security: ${((result.securityScore || 0.8) * 100).toFixed(0)}%`,
+                  supports: codeIssues.filter((i: any) => i.severity === 'critical').length === 0,
+                });
+              }
+            } catch (analysisError) {
+              console.error('[GitHub Agent] LLM deep analysis error:', analysisError);
+            }
+          }
         }
       }
     } catch (error) {

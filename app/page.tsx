@@ -279,6 +279,8 @@ function buildVerificationState(
     jobId: job.jobId,
     query: job.query,
     domain: job.domain,
+    intent: job.intent,
+    initialResponse: job.initialResponse,
     status: job.status === 'completed' ? 'completed' : job.status === 'running' || job.status === 'pending' ? 'running' : 'idle',
     elapsedSeconds: Math.round(elapsed),
     agents,
@@ -289,6 +291,7 @@ function buildVerificationState(
     finalVerdict: (job.verdict === 'ESCALATED' ? 'REJECTED' : job.verdict) as 'APPROVED' | 'WARNING' | 'REJECTED',
     verdictScores,
     evidenceChain,
+    agentVerdicts: job.agentVerdicts,
   };
 }
 

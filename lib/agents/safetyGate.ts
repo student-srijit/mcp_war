@@ -14,8 +14,8 @@ export function calculateCompositeScore(
   domain: string
 ): number {
   const weights =
-    (DEFAULT_DOMAIN_WEIGHTS as Record<string, Record<string, number>>)[domain] ||
-    (DEFAULT_DOMAIN_WEIGHTS as Record<string, Record<string, number>>)['General Technical'] || {};
+    (DEFAULT_DOMAIN_WEIGHTS as unknown as Record<string, Record<string, number>>)[domain] ||
+    (DEFAULT_DOMAIN_WEIGHTS as unknown as Record<string, Record<string, number>>)['General Technical'] || {};
 
   let totalScore = 0;
   let totalWeight = 0;

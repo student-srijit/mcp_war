@@ -28,6 +28,8 @@ export interface VerificationState {
   jobId: string;
   query: string;
   domain: string;
+  intent?: 'GENERATE' | 'VERIFY';
+  initialResponse?: string;
   status: 'idle' | 'running' | 'completed';
   elapsedSeconds: number;
   agents: AgentStatus[];
@@ -38,6 +40,7 @@ export interface VerificationState {
   finalVerdict: 'APPROVED' | 'WARNING' | 'REJECTED';
   verdictScores: { [key: string]: number };
   evidenceChain: { source: string; claim: string; supports: boolean; url: string; agent: string }[];
+  agentVerdicts?: any[];
 }
 
 const AGENTS = [
@@ -180,7 +183,10 @@ export const useMockVerification = () => {
     status: 'idle',
     elapsedSeconds: 0,
     agents: AGENTS.map((a) => ({
-      ...a,
+      id: a.id,
+      name: a.name,
+      role: a.role,
+      colorClass: a.color,
       status: 'waiting',
       latency: null,
       finding: null,

@@ -44,7 +44,8 @@ export async function callGroqAPI(
   systemPrompt: string,
   userPrompt: string,
   temperature: number = 0.7,
-  maxTokens: number = 2000
+  maxTokens: number = 2000,
+  responseFormat?: { type: 'json_object' }
 ): Promise<string> {
   const groq = initGroqClient();
   const primaryModel = getDefaultModel();
@@ -65,6 +66,7 @@ export async function callGroqAPI(
           ],
           temperature,
           max_tokens: maxTokens,
+          ...(responseFormat && { response_format: responseFormat }),
         });
 
         const content = chatCompletion.choices?.[0]?.message?.content;
@@ -119,7 +121,8 @@ export async function parseJSONFromGroq(
   systemPrompt: string,
   userPrompt: string
 ): Promise<Record<string, unknown>> {
-  const response = await callGroqAPI(systemPrompt, userPrompt, 0.2, 4000);
+  // Force JSON mode for reliability
+  const response = await callGroqAPI(systemPrompt, userPrompt, 0.2, 4000, { type: 'json_object' });
 
   // Try to extract JSON from response - handle both clean JSON and markdown-wrapped JSON
   const jsonBlockMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);

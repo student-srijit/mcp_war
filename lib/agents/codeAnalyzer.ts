@@ -1,5 +1,6 @@
 import { ClaimUnit, AgentVerdict } from '../schemas';
 import { createAgentVerdict } from './utils';
+import { JobManager } from '../jobManager';
 import { callGroqAPI } from '../groqClient';
 import { executeCode, detectLanguage } from '../judge0Client';
 import { searchQuestions } from '../stackExchangeClient';
@@ -24,7 +25,10 @@ Return a JSON object with this EXACT structure:
           "type": "syntax|security|best_practice|dependency|logic",
           "severity": "critical|major|minor",
           "description": "what the issue is",
-          "suggestedFix": "how to fix it"
+          "suggestedFix": "how to fix it",
+          "flagReason": "Detailed explanation of WHY this is an issue and its impact",
+          "fixedCode": "Full corrected code block if fixable, otherwise null",
+          "filename": "suggested_filename.ext"
         }
       ],
       "overallQuality": "good|acceptable|poor"
@@ -35,7 +39,8 @@ Return a JSON object with this EXACT structure:
 Be thorough but not pedantic. Focus on real bugs and security issues.`;
 
 export async function analyzeCodeClaims(
-  claims: ClaimUnit[]
+  claims: ClaimUnit[],
+  jobId: string
 ): Promise<AgentVerdict> {
   const startTime = Date.now();
   const codeClaims = claims.filter((c) => c.claimType === 'code');
@@ -53,9 +58,10 @@ export async function analyzeCodeClaims(
     });
   }
 
-  const issues: { claimId: string; description: string; severity: 'critical' | 'major' | 'minor' }[] = [];
+  const issues: { claimId: string; description: string; severity: 'critical' | 'major' | 'minor'; flagReason?: string; suggestedEdit?: string; patchFile?: string }[] = [];
   const evidence: { claimId: string; sourceUrl: string; excerpt: string; supports: boolean }[] = [];
   const correctiveHints: string[] = [];
+  const findings: any[] = [];
 
   // Step 1: Real Code Execution & External Searches
   for (const claim of codeClaims) {
@@ -80,6 +86,7 @@ export async function analyzeCodeClaims(
             claimId: claim.claimId,
             description: `Runtime error detected: ${execResult.stderr.slice(0, 150)}`,
             severity: 'major',
+            flagReason: `The code failed to execute in the sandbox environment.`
           });
           
           // Search StackOverflow for this specific error
@@ -147,10 +154,37 @@ export async function analyzeCodeClaims(
         const codeIssues = Array.isArray(result.issues) ? result.issues : [];
 
         for (const issue of codeIssues) {
+          let patchFileName;
+          if (issue.fixedCode) {
+            patchFileName = issue.filename || `fix_${claimId}_${Date.now()}.${lang === 'python' ? 'py' : lang === 'javascript' ? 'js' : lang === 'typescript' ? 'ts' : 'txt'}`;
+            JobManager.saveAgentResponse({
+              id: `patch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+              jobId,
+              agentName: 'CodeAnalyzer',
+              type: 'code_patch',
+              filename: patchFileName,
+              content: issue.fixedCode,
+              createdAt: Date.now()
+            });
+          }
+
+          const descriptionStr = `[${lang}] ${issue.type || 'code'}: ${issue.description || 'Issue detected'}`;
           issues.push({
             claimId,
-            description: `[${lang}] ${issue.type || 'code'}: ${issue.description || 'Issue detected'}`,
+            description: descriptionStr,
             severity: issue.severity || 'major',
+            flagReason: issue.flagReason,
+            suggestedEdit: issue.suggestedFix,
+            patchFile: patchFileName
+          });
+          
+          findings.push({
+             severity: issue.severity || 'major',
+             issue: descriptionStr,
+             flagReason: issue.flagReason,
+             suggestedFix: issue.suggestedFix,
+             hasPatch: !!patchFileName,
+             patchFile: patchFileName
           });
 
           if (issue.suggestedFix) {
@@ -201,7 +235,14 @@ export async function analyzeCodeClaims(
       'Address security vulnerabilities immediately',
     ] : [],
     latencyMs: Date.now() - startTime,
-    findings: issues.map(i => ({ severity: i.severity, issue: i.description })),
+    findings: findings.length > 0 ? findings : issues.map(i => ({ 
+       severity: i.severity, 
+       issue: i.description,
+       flagReason: i.flagReason,
+       suggestedFix: i.suggestedEdit,
+       hasPatch: !!i.patchFile,
+       patchFile: i.patchFile
+    })),
     correctionApplied: false,
   });
 }
