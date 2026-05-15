@@ -2,6 +2,9 @@ import { ClaimUnit, AgentVerdict } from '../schemas';
 import { createAgentVerdict } from './utils';
 import { mcpFetch, mcpMemory } from '../mcpServers';
 import { searchYouCom } from '../searchClient';
+import { googleSearch, googleScholar } from '../serperClient';
+import { searchQuestions } from '../stackExchangeClient';
+import { embeddingsClient } from '../embeddingsClient';
 
 export async function verifyFactualClaims(
   claims: ClaimUnit[]
@@ -25,7 +28,6 @@ export async function verifyFactualClaims(
   const issues: { claimId: string; description: string; severity: 'critical' | 'major' | 'minor' }[] = [];
   const evidence: { claimId: string; sourceUrl: string; excerpt: string; supports: boolean }[] = [];
 
-  // Verify each factual claim using multiple sources via MCP
   for (const claim of factualClaims) {
     let verified = false;
 
@@ -56,7 +58,39 @@ export async function verifyFactualClaims(
       }
     }
 
-    // Source 2: Wikipedia via MCP/fetch
+    // Source 2: Google Search via Serper (NEW)
+    if (!verified) {
+      try {
+        const google = await googleSearch(claim.content, 3);
+        if (google.found && google.results.length > 0) {
+          const top = google.results[0];
+          // Use answer box if available for direct answers
+          const snippet = google.answerBox?.answer || google.answerBox?.snippet || top.snippet;
+          const result = { sourceUrl: top.link, excerpt: `[Google] ${snippet}`, supports: true };
+          evidence.push({ claimId: claim.claimId, ...result });
+          mcpMemory.set(cacheKey, result);
+          verified = true;
+
+          // If we have embeddings, score the relevance
+          if (embeddingsClient.isConfigured()) {
+            try {
+              const similarity = await embeddingsClient.semanticSimilarity(claim.content, snippet);
+              if (similarity < 0.4) {
+                // Low relevance — mark as uncertain rather than verified
+                evidence[evidence.length - 1].supports = false;
+                evidence[evidence.length - 1].excerpt += ` (relevance: ${(similarity * 100).toFixed(0)}% — low match)`;
+                verified = false;
+              }
+            } catch { /* embeddings are optional */ }
+          }
+          if (verified) continue;
+        }
+      } catch (err) {
+        console.error('[VERITAS] Serper search error:', err);
+      }
+    }
+
+    // Source 3: Wikipedia via MCP/fetch
     if (!verified) {
       const wikiResult = await mcpFetch.searchWikipedia(claim.content);
       if (wikiResult.found) {
@@ -68,7 +102,7 @@ export async function verifyFactualClaims(
       }
     }
 
-    // Source 3: arXiv via MCP/fetch
+    // Source 4: arXiv via MCP/fetch
     if (!verified) {
       const arxivResult = await mcpFetch.searchArXiv(claim.content);
       if (arxivResult.found) {
@@ -84,7 +118,28 @@ export async function verifyFactualClaims(
       }
     }
 
-    // Source 4: OpenAlex via MCP/fetch
+    // Source 5: Google Scholar via Serper (NEW — for academic claims)
+    if (!verified) {
+      try {
+        const scholar = await googleScholar(claim.content, 2);
+        if (scholar.found && scholar.papers.length > 0) {
+          const paper = scholar.papers[0];
+          const result = {
+            sourceUrl: paper.link,
+            excerpt: `[Scholar] ${paper.title}${paper.year ? ` (${paper.year})` : ''}${paper.citedBy ? ` — ${paper.citedBy} citations` : ''}`,
+            supports: true,
+          };
+          evidence.push({ claimId: claim.claimId, ...result });
+          mcpMemory.set(cacheKey, result);
+          verified = true;
+          continue;
+        }
+      } catch (err) {
+        console.error('[VERITAS] Scholar search error:', err);
+      }
+    }
+
+    // Source 6: OpenAlex via MCP/fetch
     if (!verified) {
       const openAlexResult = await mcpFetch.searchOpenAlex(claim.content);
       if (openAlexResult.found) {
@@ -100,18 +155,40 @@ export async function verifyFactualClaims(
       }
     }
 
+    // Source 7: StackOverflow (NEW — for technical claims)
+    if (!verified) {
+      try {
+        const so = await searchQuestions(claim.content);
+        if (so.found && so.questions.length > 0) {
+          const q = so.questions[0];
+          if (q.isAnswered && q.score > 0) {
+            const result = {
+              sourceUrl: q.link,
+              excerpt: `[StackOverflow] ${q.title} (score: ${q.score}, ${q.answerCount} answers)`,
+              supports: true,
+            };
+            evidence.push({ claimId: claim.claimId, ...result });
+            mcpMemory.set(cacheKey, result);
+            verified = true;
+            continue;
+          }
+        }
+      } catch (err) {
+        console.error('[VERITAS] StackOverflow search error:', err);
+      }
+    }
+
     // Not found in any source
     if (!verified) {
       issues.push({
         claimId: claim.claimId,
-        description: 'Factual claim could not be verified through any public source (Wikipedia, arXiv, OpenAlex)',
+        description: 'Factual claim could not be verified through any source (Google, Wikipedia, arXiv, Scholar, OpenAlex, StackOverflow)',
         severity: 'major',
       });
-
       evidence.push({
         claimId: claim.claimId,
         sourceUrl: 'https://www.wikipedia.org',
-        excerpt: 'No verification found in Wikipedia, arXiv, or OpenAlex academic sources',
+        excerpt: 'No verification found across 7 search sources',
         supports: false,
       });
     }

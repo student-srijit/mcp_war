@@ -5,6 +5,7 @@ import { validateMathClaims } from './mathValidator';
 import { analyzeCodeClaims } from './codeAnalyzer';
 import { performReasoning } from './reasoningAgent';
 import { verifyStandardsClaims } from './standardsAgent';
+import { analyzeGitHub } from './githubAgent';
 import { calculateCompositeScore, determineVerdict } from './safetyGate';
 import { runCorrectionAgent } from './correctionAgent';
 import { createAgentVerdict } from './utils';
@@ -58,7 +59,7 @@ export async function runVerificationPipeline(job: VerificationJob) {
     emitLog(job.jobId, 'ORCHESTRATOR', 'Starting parallel verification (5 agents)...', 'info');
 
     // Launch ALL verification agents in parallel
-    const [factResult, mathResult, codeResult, reasoningResult, standardsResult] = await Promise.allSettled([
+    const [factResult, mathResult, codeResult, reasoningResult, standardsResult, githubResult] = await Promise.allSettled([
       (async () => {
         emitLog(job.jobId, 'FACT_VERIFIER', 'Searching Wikipedia, arXiv, OpenAlex...', 'info');
         const result = await verifyFactualClaims(claims);
@@ -104,6 +105,17 @@ export async function runVerificationPipeline(job: VerificationJob) {
         );
         return result;
       })(),
+      (async () => {
+        emitLog(job.jobId, 'GITHUB_AGENT', 'Analyzing GitHub repositories and code...', 'info');
+        const result = await analyzeGitHub(claims, job.query);
+        if (result.verdict !== 'skip') {
+          emitLog(job.jobId, 'GITHUB_AGENT',
+            `Completed: ${result.verdict} (${(result.confidenceScore * 100).toFixed(0)}%) — ${result.issues.length} issues`,
+            result.verdict === 'pass' ? 'success' : result.verdict === 'fail' ? 'error' : 'warning'
+          );
+        }
+        return result;
+      })(),
     ]);
 
     // Collect verdicts from settled promises
@@ -133,6 +145,7 @@ export async function runVerificationPipeline(job: VerificationJob) {
     allVerdicts.push(extractVerdict(codeResult, 'code_analyzer', 'CodeAnalyzer'));
     allVerdicts.push(extractVerdict(reasoningResult, 'reasoning_agent', 'ReasoningAgent'));
     allVerdicts.push(extractVerdict(standardsResult, 'standards_agent', 'StandardsAgent'));
+    allVerdicts.push(extractVerdict(githubResult, 'github_agent', 'GitHubAgent'));
 
     // Collect evidence from all agents
     for (const v of allVerdicts) {
@@ -190,12 +203,13 @@ export async function runVerificationPipeline(job: VerificationJob) {
       emitLog(job.jobId, 'ORCHESTRATOR', `Re-running verification on corrected response (Retry ${retryCount}/3)...`, 'info');
 
       // Re-run ALL agents in parallel with corrected claims
-      const [reFact, reMath, reCode, reReasoning, reStandards] = await Promise.allSettled([
+      const [reFact, reMath, reCode, reReasoning, reStandards, reGithub] = await Promise.allSettled([
         verifyFactualClaims(claims),
         validateMathClaims(claims),
         analyzeCodeClaims(claims),
         performReasoning(claims, job.query),
         verifyStandardsClaims(claims),
+        analyzeGitHub(claims, job.query),
       ]);
 
       currentVerdicts = [
@@ -204,6 +218,7 @@ export async function runVerificationPipeline(job: VerificationJob) {
         extractVerdict(reCode, 'code_analyzer', 'CodeAnalyzer'),
         extractVerdict(reReasoning, 'reasoning_agent', 'ReasoningAgent'),
         extractVerdict(reStandards, 'standards_agent', 'StandardsAgent'),
+        extractVerdict(reGithub, 'github_agent', 'GitHubAgent'),
       ];
 
       // Mark correction applied

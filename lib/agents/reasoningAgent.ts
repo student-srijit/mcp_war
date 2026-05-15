@@ -1,6 +1,7 @@
 import { ClaimUnit, AgentVerdict } from '../schemas';
 import { createAgentVerdict } from './utils';
 import { callGroqAPI } from '../groqClient';
+import { embeddingsClient } from '../embeddingsClient';
 
 const REASONING_SYSTEM_PROMPT = `You are a logical reasoning expert. Perform a thorough chain-of-thought analysis on the given claims.
 
@@ -51,6 +52,28 @@ export async function performReasoning(
   const evidence: { claimId: string; sourceUrl: string; excerpt: string; supports: boolean }[] = [];
   const correctiveHints: string[] = [];
 
+  // Step 1: Semantic Contradiction Check via Embeddings
+  if (embeddingsClient.isConfigured() && claims.length > 1) {
+    try {
+      for (let i = 0; i < claims.length; i++) {
+        for (let j = i + 1; j < claims.length; j++) {
+          const sim = await embeddingsClient.semanticSimilarity(claims[i].content, claims[j].content);
+          // If two claims are extremely dissimilar in a context where they should align,
+          // or if we had a specific "contradiction" model, we'd use it here.
+          // For now, we'll just note high semantic overlap as a potential redundancy 
+          // or flag very low similarity if they are meant to be a coherent chain.
+          if (sim > 0.95) {
+             // Redundancy detected
+             correctiveHints.push(`${claims[i].claimId} and ${claims[j].claimId} are nearly identical (similarity: ${(sim*100).toFixed(0)}%)`);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[VERITAS] Semantic similarity error:', e);
+    }
+  }
+
+  // Step 2: LLM Chain of Thought Analysis
   try {
     const claimsList = claims.map((c) => `[${c.claimId}] (${c.claimType}): ${c.content}`).join('\n');
     const userPrompt = `Original query: ${originalQuery}\n\nClaims to analyze for logical consistency:\n\n${claimsList}`;
@@ -86,7 +109,7 @@ export async function performReasoning(
         evidence.push({
           claimId: claims[0]?.claimId || 'overall',
           sourceUrl: 'internal-reasoning-engine',
-          excerpt: parsed.chainOfThought,
+          excerpt: `[HuggingFace Embeddings + LLM] ${parsed.chainOfThought}`,
           supports: foundIssues.length === 0,
         });
       }

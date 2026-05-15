@@ -1,6 +1,9 @@
 import { ClaimUnit, AgentVerdict } from '../schemas';
 import { createAgentVerdict } from './utils';
 import { callGroqAPI } from '../groqClient';
+import { executeCode, detectLanguage } from '../judge0Client';
+import { searchQuestions } from '../stackExchangeClient';
+import { searchCode } from '../githubClient';
 
 const CODE_ANALYSIS_PROMPT = `You are an expert code reviewer and static analysis tool. Analyze the given code claims for:
 
@@ -31,15 +34,6 @@ Return a JSON object with this EXACT structure:
 
 Be thorough but not pedantic. Focus on real bugs and security issues.`;
 
-function detectLanguage(content: string): string {
-  if (content.includes('def ') || content.includes('import ') && content.includes(':')) return 'python';
-  if (content.includes('const ') || content.includes('let ') || content.includes('function ')) return 'javascript';
-  if (content.includes(': ') && (content.includes('interface ') || content.includes('type '))) return 'typescript';
-  if (content.includes('#include') || content.includes('int main')) return 'c';
-  if (content.includes('std::') || content.includes('cout')) return 'cpp';
-  return 'unknown';
-}
-
 export async function analyzeCodeClaims(
   claims: ClaimUnit[]
 ): Promise<AgentVerdict> {
@@ -63,6 +57,73 @@ export async function analyzeCodeClaims(
   const evidence: { claimId: string; sourceUrl: string; excerpt: string; supports: boolean }[] = [];
   const correctiveHints: string[] = [];
 
+  // Step 1: Real Code Execution & External Searches
+  for (const claim of codeClaims) {
+    const lang = claim.language || detectLanguage(claim.content);
+    
+    // Attempt execution for supported languages if snippet is short
+    if (['python', 'javascript', 'typescript', 'go', 'c', 'cpp', 'java'].includes(lang) && claim.content.length < 2000) {
+      try {
+        const execResult = await executeCode(claim.content, lang);
+        
+        evidence.push({
+          claimId: claim.claimId,
+          sourceUrl: 'judge0',
+          excerpt: execResult.success 
+            ? `Execution: ✅ Code runs successfully via ${execResult.engine} | Output: ${execResult.stdout.slice(0, 100)}` 
+            : `Execution: ❌ Runtime error via ${execResult.engine} | ${execResult.stderr.slice(0, 150)}`,
+          supports: execResult.success,
+        });
+
+        if (!execResult.success) {
+          issues.push({
+            claimId: claim.claimId,
+            description: `Runtime error detected: ${execResult.stderr.slice(0, 150)}`,
+            severity: 'major',
+          });
+          
+          // Search StackOverflow for this specific error
+          if (execResult.stderr.length > 10) {
+            const errorLine = execResult.stderr.split('\n').find(l => l.trim().length > 0) || execResult.stderr;
+            const soRes = await searchQuestions(errorLine.slice(0, 100), [lang]);
+            if (soRes.found && soRes.questions.length > 0) {
+              const q = soRes.questions[0];
+              evidence.push({
+                claimId: claim.claimId,
+                sourceUrl: q.link,
+                excerpt: `[StackOverflow] Known issue: ${q.title} (${q.answerCount} answers)`,
+                supports: false,
+              });
+              correctiveHints.push(`${claim.claimId}: StackOverflow suggests checking - ${q.link}`);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[VERITAS] Code execution error:', e);
+      }
+    }
+
+    // Search GitHub for similar patterns
+    try {
+      // Pick a distinctive line for search
+      const lines = claim.content.split('\n').map(l => l.trim()).filter(l => l.length > 10);
+      const searchLine = lines.length > 0 ? lines[0] : claim.content;
+      const ghRes = await searchCode(searchLine.slice(0, 50), lang);
+      if (ghRes.found && ghRes.results.length > 0) {
+        const r = ghRes.results[0];
+        evidence.push({
+          claimId: claim.claimId,
+          sourceUrl: r.url,
+          excerpt: `[GitHub] Found similar code pattern in ${r.repository}`,
+          supports: true,
+        });
+      }
+    } catch (e) {
+      console.error('[VERITAS] GitHub code search error:', e);
+    }
+  }
+
+  // Step 2: LLM Static Analysis
   try {
     const claimsList = codeClaims.map((c) => {
       const lang = c.language || detectLanguage(c.content);
@@ -101,30 +162,25 @@ export async function analyzeCodeClaims(
           evidence.push({
             claimId,
             sourceUrl: `https://github.com/standard/${lang}`,
-            excerpt: `Code passes analysis — quality: ${result.overallQuality || 'acceptable'}`,
+            excerpt: `Static Analysis: Code passes review — quality: ${result.overallQuality || 'acceptable'}`,
             supports: true,
-          });
-        } else {
-          evidence.push({
-            claimId,
-            sourceUrl: `https://github.com/standard/${lang}`,
-            excerpt: `Found ${codeIssues.length} issue(s) in ${lang} code`,
-            supports: false,
           });
         }
       }
     }
   } catch (error) {
     console.error('[VERITAS] Code analyzer Groq error:', error);
-    // Fallback
-    for (const claim of codeClaims) {
-      const lang = claim.language || detectLanguage(claim.content);
-      evidence.push({
-        claimId: claim.claimId,
-        sourceUrl: `https://github.com/standard/${lang}`,
-        excerpt: 'Code analysis unavailable — LLM error',
-        supports: true,
-      });
+    // Fallback if no issues from execution
+    if (issues.length === 0) {
+      for (const claim of codeClaims) {
+        const lang = claim.language || detectLanguage(claim.content);
+        evidence.push({
+          claimId: claim.claimId,
+          sourceUrl: `https://github.com/standard/${lang}`,
+          excerpt: 'Static LLM analysis unavailable — relying on execution/searches',
+          supports: true,
+        });
+      }
     }
   }
 
@@ -141,7 +197,7 @@ export async function analyzeCodeClaims(
     evidence,
     correctiveHints: correctiveHints.length > 0 ? [
       ...correctiveHints,
-      'Fix syntax errors as indicated by analysis',
+      'Fix syntax and runtime errors as indicated',
       'Address security vulnerabilities immediately',
     ] : [],
     latencyMs: Date.now() - startTime,

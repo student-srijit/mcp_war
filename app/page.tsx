@@ -42,6 +42,11 @@ const EXAMPLE_QUERIES = [
     domain: 'Infrastructure & Energy',
     query: 'Verify BTU calculation for HVAC sizing: 2000 sq ft × 20 BTU/sq ft = 40,000 BTU required.',
   },
+  {
+    title: 'GitHub code review',
+    domain: 'Software Development',
+    query: 'Analyze the code quality and security of https://github.com/expressjs/express/blob/master/lib/application.js',
+  },
 ];
 
 // Agent configuration matching the VerificationState shape
@@ -51,6 +56,7 @@ const AGENT_CONFIGS = [
   { id: 'fact-verifier', name: 'Fact Verifier', role: 'Claims validation via external sources', color: 'text-green-400' },
   { id: 'math-validator', name: 'Math Validator', role: 'Formula & calculation verification', color: 'text-amber-400' },
   { id: 'code-analyzer', name: 'Code Analyzer', role: 'Code quality & syntax checking', color: 'text-red-400' },
+  { id: 'github-agent', name: 'GitHub Agent', role: 'Repo reading & deep code analysis', color: 'text-blue-400' },
   { id: 'standards-agent', name: 'Standards Agent', role: 'IEEE/ISO/OSHA compliance checks', color: 'text-amber-400' },
   { id: 'reasoning-agent', name: 'Reasoning Agent', role: 'Sequential logic validation', color: 'text-purple-400' },
   { id: 'safety-gate', name: 'Safety Gate', role: 'Final verdict & hallucination detection', color: 'text-red-400' },
@@ -61,6 +67,7 @@ const AGENT_ID_MAP: Record<string, string> = {
   'fact_verifier': 'fact-verifier',
   'math_validator': 'math-validator',
   'code_analyzer': 'code-analyzer',
+  'github_agent': 'github-agent',
   'standards_agent': 'standards-agent',
   'reasoning_agent': 'reasoning-agent',
 };

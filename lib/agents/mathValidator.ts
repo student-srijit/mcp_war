@@ -1,6 +1,7 @@
 import { ClaimUnit, AgentVerdict } from '../schemas';
 import { createAgentVerdict } from './utils';
 import { callGroqAPI } from '../groqClient';
+import { wolframClient } from '../wolframClient';
 
 const MATH_SYSTEM_PROMPT = `You are a mathematical verification expert. Analyze the given mathematical claims for correctness.
 
@@ -50,6 +51,33 @@ export async function validateMathClaims(
   const evidence: { claimId: string; sourceUrl: string; excerpt: string; supports: boolean }[] = [];
   const correctiveHints: string[] = [];
 
+  // Step 1: Real Computation via Wolfram Alpha
+  for (const claim of mathClaims) {
+    if (wolframClient.isConfigured()) {
+      try {
+        const wfResult = await wolframClient.verifyMath(claim.content);
+        if (wfResult.verified && wfResult.computedResult) {
+          evidence.push({
+            claimId: claim.claimId,
+            sourceUrl: `https://www.wolframalpha.com/input?i=${encodeURIComponent(claim.content)}`,
+            excerpt: `[Wolfram Alpha] Computed: ${wfResult.computedResult.slice(0, 150)}`,
+            supports: true,
+          });
+        } else if (wfResult.details) {
+          evidence.push({
+            claimId: claim.claimId,
+            sourceUrl: `https://www.wolframalpha.com/input?i=${encodeURIComponent(claim.content)}`,
+            excerpt: `[Wolfram Alpha] Analysis: ${wfResult.details.slice(0, 150)}`,
+            supports: false, // Could not explicitly verify
+          });
+        }
+      } catch (e) {
+        console.error('[VERITAS] Wolfram Alpha error:', e);
+      }
+    }
+  }
+
+  // Step 2: LLM Verification for context and reasoning
   try {
     const claimsList = mathClaims.map((c) => `[${c.claimId}]: ${c.content}`).join('\n');
     const userPrompt = `Verify these mathematical claims:\n\n${claimsList}`;
@@ -78,32 +106,41 @@ export async function validateMathClaims(
             correctiveHints.push(`${claimId}: Correct value should be ${result.correctedValue}`);
           }
 
-          evidence.push({
-            claimId,
-            sourceUrl: 'https://www.wolframalpha.com/input',
-            excerpt: `Math validation: ${result.issue || 'Error detected'}`,
-            supports: false,
-          });
+          // If we haven't already added Wolfram evidence, add LLM evidence
+          if (!evidence.find(e => e.claimId === claimId)) {
+            evidence.push({
+              claimId,
+              sourceUrl: 'https://www.wolframalpha.com/input',
+              excerpt: `Math validation: ${result.issue || 'Error detected'}`,
+              supports: false,
+            });
+          }
         } else {
-          evidence.push({
-            claimId,
-            sourceUrl: 'https://www.wolframalpha.com/input',
-            excerpt: 'Mathematical claim verified correct by AI analysis',
-            supports: true,
-          });
+          if (!evidence.find(e => e.claimId === claimId)) {
+            evidence.push({
+              claimId,
+              sourceUrl: 'https://www.wolframalpha.com/input',
+              excerpt: 'Mathematical claim verified correct by AI analysis',
+              supports: true,
+            });
+          }
         }
       }
     }
   } catch (error) {
     console.error('[VERITAS] Math validator Groq error:', error);
     // Fallback: mark as unverified rather than crashing
-    for (const claim of mathClaims) {
-      evidence.push({
-        claimId: claim.claimId,
-        sourceUrl: 'https://www.wolframalpha.com/input',
-        excerpt: 'Could not verify — LLM analysis unavailable',
-        supports: true, // Give benefit of the doubt
-      });
+    if (issues.length === 0) {
+      for (const claim of mathClaims) {
+        if (!evidence.find(e => e.claimId === claim.claimId)) {
+          evidence.push({
+            claimId: claim.claimId,
+            sourceUrl: 'https://www.wolframalpha.com/input',
+            excerpt: 'Could not verify — LLM analysis unavailable',
+            supports: true, // Give benefit of the doubt
+          });
+        }
+      }
     }
   }
 

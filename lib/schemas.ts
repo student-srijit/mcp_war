@@ -2,13 +2,14 @@
 
 export interface ClaimUnit {
   claimId: string;
-  claimType: 'factual' | 'mathematical' | 'code' | 'standard_citation' | 'reasoning';
+  claimType: 'factual' | 'mathematical' | 'code' | 'standard_citation' | 'reasoning' | 'github';
   content: string;
   language?: string; // for code blocks
   context?: string;
   position?: number;
   domain?: string;
   severity?: 'critical' | 'major' | 'minor';
+  githubUrl?: string; // for GitHub code claims
 }
 
 export interface Issue {
@@ -48,7 +49,7 @@ export interface Finding {
 
 export interface EvidenceItem {
   id: string;
-  source: 'Wikipedia' | 'arXiv' | 'YouCom' | 'Wolfram' | 'GitHub' | 'StandardsDB';
+  source: 'Wikipedia' | 'arXiv' | 'YouCom' | 'Wolfram' | 'GitHub' | 'StandardsDB' | 'Google' | 'StackOverflow' | 'Judge0' | 'HuggingFace' | 'GoogleScholar' | 'OpenAlex';
   claimId: string;
   supportVerdict: 'supports' | 'contradicts' | 'neutral';
   title: string;
@@ -71,6 +72,7 @@ export interface VerificationJob {
   verdict: 'APPROVED' | 'WARNING' | 'REJECTED' | 'ESCALATED';
   retryCount?: number;
   pipelineSteps: PipelineStep[];
+  activeTools?: string[]; // Tools that are active for this job
 }
 
 export interface PipelineStep {
@@ -94,4 +96,28 @@ export interface FeedLogEntry {
 
 export interface DomainWeights {
   [key: string]: number;
+}
+
+// GitHub-specific types
+export interface GitHubAnalysis {
+  repoInfo?: {
+    name: string;
+    language: string;
+    stars: number;
+    description: string;
+  };
+  filesAnalyzed: number;
+  findings: Finding[];
+  codeQuality: 'excellent' | 'good' | 'acceptable' | 'poor';
+  securityIssues: number;
+}
+
+// Tool status for the /api/tools endpoint
+export interface ToolStatus {
+  name: string;
+  envVar: string;
+  configured: boolean;
+  description: string;
+  freeLimit: string;
+  signupUrl: string;
 }
