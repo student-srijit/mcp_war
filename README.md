@@ -353,25 +353,6 @@ Check `/api/jobs/{jobId}/logs` for agent activity
 → Query may be genuinely unanswerable
 → Check the "ESCALATED" verdict and review issues
 
-## Next Steps / Enhancements
-
-- [ ] Add real sympy math validation (currently simulated)
-- [ ] Implement real ESLint/Pylint execution (currently simulated)
-- [ ] Add Prometheus metrics exporting
-- [ ] Implement SQLite persistence for jobs
-- [ ] Add Redis job queue for scale
-- [ ] Multi-user support with auth
-- [ ] Batch verification API
-- [ ] Custom domain classifier fine-tuning
-
-## License
-
-MIT
-
-## Contact
-
-Built for the International Hackathon · Agentic AI Systems Track
-
 ---
 
 **VERITAS** — Where AI verification is never left to chance.
